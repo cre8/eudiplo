@@ -10,6 +10,7 @@ import {
     Oauth2ResourceServer,
     SupportedAuthenticationScheme,
     authorizationCodeGrantIdentifier,
+    preAuthorizedCodeGrantIdentifier,
 } from '@openid4vc/oauth2';
 import {
     type CredentialResponse,
@@ -125,16 +126,30 @@ export class Oid4vciService implements OnModuleInit {
             body.credentialConfigurationIds ||
             issuanceConfig.credentialConfigs.map((config) => config.id);
 
-        const issuerMetadata = await this.issuerMetadata(tenantId);
+        let authorization_code: string | undefined;
+        let grants: any;
         const issuer_state = v4();
+        if (issuanceConfig.authenticationConfig.method === 'none') {
+            authorization_code = v4();
+            grants = {
+                [preAuthorizedCodeGrantIdentifier]: {
+                    'pre-authorized_code': authorization_code,
+                },
+            };
+        } else {
+            grants = {
+                [authorizationCodeGrantIdentifier]: {
+                    issuer_state,
+                },
+            };
+        }
+
+        const issuerMetadata = await this.issuerMetadata(tenantId);
+
         return this.issuer
             .createCredentialOffer({
                 credentialConfigurationIds,
-                grants: {
-                    [authorizationCodeGrantIdentifier]: {
-                        issuer_state,
-                    },
-                },
+                grants,
                 issuerMetadata,
             })
             .then(
@@ -145,6 +160,7 @@ export class Oid4vciService implements OnModuleInit {
                         credentialPayload: body,
                         tenantId: user.sub,
                         issuanceId: body.issuanceId,
+                        authorization_code,
                     });
                     return {
                         session: issuer_state,
@@ -173,12 +189,16 @@ export class Oid4vciService implements OnModuleInit {
             throw new Error('Invalid credential request');
         }
 
+        const protocol = new URL(
+            this.configService.getOrThrow<string>('PUBLIC_URL'),
+        ).protocol;
+
         const headers = getHeadersFromRequest(req);
         const { tokenPayload } =
             await this.resourceServer.verifyResourceRequest({
                 authorizationServers: issuerMetadata.authorizationServers,
                 request: {
-                    url: `https://${req.host}${req.url}`,
+                    url: `${protocol}//${req.host}${req.url}`,
                     method: req.method as HttpMethod,
                     headers,
                 },
@@ -277,11 +297,14 @@ export class Oid4vciService implements OnModuleInit {
     ) {
         const issuerMetadata = await this.issuerMetadata(tenantId);
         const headers = getHeadersFromRequest(req);
+        const protocol = new URL(
+            this.configService.getOrThrow<string>('PUBLIC_URL'),
+        ).protocol;
         const { tokenPayload } =
             await this.resourceServer.verifyResourceRequest({
                 authorizationServers: issuerMetadata.authorizationServers,
                 request: {
-                    url: `https://${req.host}${req.url}`,
+                    url: `${protocol}//${req.host}${req.url}`,
                     method: req.method as HttpMethod,
                     headers,
                 },
